@@ -1,0 +1,7 @@
+.vscode
+_pychache_
+.env
+data/
+logs/
+tests/
+.venv/
