@@ -1,5 +1,7 @@
 .vscode
-_pychache_
+__init__.py
+__pycache__/
+__pycache__
 .env
 data/
 logs/
