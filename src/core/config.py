@@ -1,11 +1,17 @@
-"""
-src/core/config.py -> SCRIPT CONFIG SETUP
-——————————————————————————————————————————
+"""Shared configuration for Checkguard.
 
-CONFIG: File paths defined ONCE at the top — never hardcode paths in functions.
+This module is the single source of truth for paths, target URLs, browser
+timeouts, credentials, and run-level options used by the monitoring scripts.
+Values are loaded when the module is imported. The ``Auth`` fields can be
+overridden with environment variables, which are typically supplied through a
+local ``.env`` file. Do not commit credentials or other secrets to source
+control.
 
-pathlib.Path works on both Windows and Linux/Mac (unlike string paths)
-
+Paths are represented by :class:`pathlib.Path` so callers can build paths
+without relying on platform-specific separators. ``BASE_DIR`` is resolved
+from the current working directory's parent, so run the monitor from the
+project directory (or set the working directory explicitly) when using these
+constants.
 """
 
 import os
@@ -17,7 +23,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ============== PATHS ==========================
+# Project output and data locations. These are intentionally defined once so
+# callers do not duplicate path-building logic.
 BASE_DIR = Path(".").parent.resolve()
 RAW_DIR = BASE_DIR / "data" / "raw"
 UPLOAD_DIR = BASE_DIR / "data" / "raw"
@@ -26,17 +33,24 @@ FINAL_DIR = BASE_DIR / "data" / "final"
 SCREENSHOT_DIR = BASE_DIR / "screenshots"
 LOG_DIR = BASE_DIR / "logs"
 
-# ============= TARGET URL SETTINGS =============
+# Target endpoints used by the browser checks.
 BASE_URL = "https://www.saucedemo.com"
 LOGIN_URL = "https://www.saucedemo.com"
 INVENTORY_URL = "https://the-internet.herokuapp.com/inventory.html"
 
 
-DEFAULT_TIMEOUT_MS = 10_000  # 10 seconds — generous, but never infinite
+DEFAULT_TIMEOUT_MS = 20_000  # Playwright timeout in milliseconds (20 seconds)
 
 
 @dataclass
 class Auth:
+    """Credentials and browser state settings for the test portal.
+
+    Each credential defaults to the value of its matching environment
+    variable. The ``"None"`` fallback preserves the existing behavior but is
+    not a valid credential; configure the variables before running checks.
+    """
+
     standard_user: str = os.getenv("STANDARD_USERNAME", "None")
     locked_out_user: str = os.getenv("LOCKED_OUT_USERNAME", "None")
     problem_user: str = os.getenv("PROBLEM_USERNAME", "None")
@@ -46,11 +60,14 @@ class Auth:
 
     @property
     def state_filename(self) -> Path:
+        """Return the browser state path relative to :data:`BASE_DIR`."""
         return BASE_DIR / self.session_storage_dir
 
 
 @dataclass
 class Url:
+    """URLs used by the authentication and inventory checks."""
+
     base_url: str = BASE_URL
     login_url: str = LOGIN_URL
     inventory_url: str = INVENTORY_URL
@@ -58,6 +75,12 @@ class Url:
 
 @dataclass
 class RunReport:
+    """Mutable summary of one monitoring run.
+
+    ``issues`` contains human-readable descriptions of problems encountered
+    during the run. Counters are initialized to zero for each new report.
+    """
+
     run_timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     steps_attempted: int = 0
     steps_succeeded: int = 0
@@ -65,11 +88,19 @@ class RunReport:
     issues: list = field(default_factory=list)
 
     def add_issues(self, description: str) -> None:
+        """Append an issue description to the report."""
         self.issues.append(description)
 
 
 @dataclass
 class PortalConfig:
+    """Runtime options for a portal monitoring session.
+
+    ``auth`` and ``url`` are required so a caller must provide the portal
+    credentials and endpoints explicitly. ``default_timeout_ms`` is passed to
+    Playwright and is expressed in milliseconds.
+    """
+
     auth: Auth
     url: Url
     headless: bool = True
