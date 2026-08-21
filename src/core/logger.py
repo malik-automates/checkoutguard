@@ -29,7 +29,7 @@ def setup_logging(log_dir: Path, level: str = "INFO") -> logging.Logger:
     console.setFormatter(fmt)
 
     file_handler = logging.handlers.RotatingFileHandler(
-        log_dir / "checkguard.log",
+        log_dir / "pipeline.log",
         maxBytes=5 * 1024 * 1024,
         backupCount=5,
         encoding="utf-8",
