@@ -1,7 +1,7 @@
 """
 src/checks.py
 ——————————————
-CheckoutGuard · Phase 2 — Funnel Automation & Link Audit
+CheckoutGuard · Phase 3 — Reliability
 
 Walks the full purchase funnel (sort → cart → checkout → receipt) for
 every account that can log in, and audits the three footer social
@@ -15,34 +15,25 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 
-from playwright.sync_api import BrowserContext, Error, Page, sync_playwright
+from playwright.sync_api import BrowserContext, Error, Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from src.auth.login import attempt_login, logout
-from src.core.config import DEFAULT_TIMEOUT_MS, FINAL_DIR, LOG_DIR, Auth, Url
-from src.core.logger import setup_logging
+from src.core.config import (
+    FINAL_DIR,
+    PortalConfig,
+    Url,
+)
+from src.core.retry import retry_action
 
-
-@dataclass
-class CheckResult:
-    """One structured result per account. Every field has a safe,
-    correctly-typed default — no fragile tuple-indexing landmines."""
-
-    account_name: str
-    login_success: bool
-    checkout_end_to_end: bool = False
-    sorted_prices: list[float] = field(default_factory=list)
-    is_sorted: bool = False
-    order_receipt: Path | None = None
-    social_link_tab: list[tuple[str, bool]] = field(default_factory=list)
-    notes: str | None = None
+# —————————————————————————————————————————————
+# WORKFLOW CHECKS
+# —————————————————————————————————————————————
 
 
 # ============================================
-# SORT INVENTORY PRICE FROM LOW TO HIGH
+# CHECK 1: SORT INVENTORY PRICE FROM LOW TO HIGH
 # ============================================
 def sort_items_low_high(
     option_label: str = "Price (low to high)", *, page: Page, log: logging.Logger
@@ -80,38 +71,58 @@ def is_sorted_from_low_high(prices: list | None) -> bool:
     return is_sorted
 
 
-# ========================
-#  CART
-# ========================
-
-
-def add_products(page: Page, no_of_clicks: int = 2) -> tuple[list[dict[str, str]], int]:
+# =================================
+#  CHECK 2: ADD PRODUCTST TO CART
+# ================================
+def add_products(
+    page: Page, config: PortalConfig, log: logging.Logger, no_of_clicks: int = 2
+) -> tuple[list[dict[str, str]], int]:
     """
     Add exactly `no_of_clicks` products to the cart. The number of
     clicks and the number of recorded items must always stay in sync —
     a mismatch here silently poisons every downstream cart check.
     """
-    if no_of_clicks < 1:
-        raise ValueError(f"no_of_clicks must be at least 1, got {no_of_clicks}")
 
-    inventory_cards = page.locator('[data-test="inventory-item"]').all()[:no_of_clicks]
+    def _add() -> tuple[list[dict[str, str]], int]:
+        if no_of_clicks < 1:
+            raise ValueError(f"no_of_clicks must be at least 1, got {no_of_clicks}")
 
-    if not inventory_cards:
-        raise RuntimeError(
-            "No inventory items found on the page — is this a real site regression?"
-        )
+        inventory_cards = page.locator('[data-test="inventory-item"]').all()[
+            :no_of_clicks
+        ]
+        if not inventory_cards:
+            raise RuntimeError(
+                "No inventory items found on the page — is this a real site regression?"
+            )
 
-    selected_items: list[dict[str, str]] = []
-    for card in inventory_cards:
-        item = {
-            "item_name": card.locator('[data-test="inventory-item-name"]').inner_text(),
-            "price": card.locator('[data-test="inventory-item-price"]').inner_text(),
-        }
-        button = card.get_by_role("button", name="Add to cart")
-        button.click()
-        selected_items.append(item)
+        selected_items: list[dict[str, str]] = []
+        for card in inventory_cards:
+            item = {
+                "item_name": card.locator(
+                    '[data-test="inventory-item-name"]'
+                ).inner_text(),
+                "price": card.locator(
+                    '[data-test="inventory-item-price"]'
+                ).inner_text(),
+            }
+            # Idempotent: a retry after a partial failure must not re-click
+            # an item that's already in the cart — the button has already
+            # flipped to "Remove" and won't exist under this name anymore.
+            add_button = card.get_by_role("button", name="Add to cart")
+            if add_button.count() > 0:
+                add_button.click()
+            selected_items.append(item)
 
-    return selected_items, len(selected_items)
+        return selected_items, len(selected_items)
+
+    results = retry_action(
+        _add,
+        description="add products to cart",
+        log=log,
+        retries=config.max_retries,
+        backoff_base=config.backoff_base,
+    )
+    return results
 
 
 def _get_no_of_items_cart_badge(page: Page) -> int:
@@ -130,6 +141,9 @@ def _get_no_of_items_cart_badge(page: Page) -> int:
     return int(badge.inner_text().strip())
 
 
+# =============================================
+#  CHECK 3: CART BADGE MATCHES SELECTED ITEMS
+# =============================================
 def cart_badge_matches_selected_items(
     page: Page, no_of_added_items: int, log: logging.Logger
 ) -> bool:
@@ -181,11 +195,12 @@ def check_items_in_cart_match_items_selected(
     return _cart_items_match_selected_items(page, selected_items)
 
 
-# ——————————————————————————————
-# FULL CHECKOUT FUNNEL
-# ——————————————————————————————
+# =================================
+# CHECK 4: FULL CHECKOUT FUNNEL
+# =================================
 def check_end_to_end_checkout(
     page: Page,
+    config: PortalConfig,
     no_of_items_added: int,
     firstname: str,
     lastname: str,
@@ -201,8 +216,7 @@ def check_end_to_end_checkout(
     falls through to a generic message that misdiagnoses the cause.
     """
 
-    selected_items, count = add_products(page, no_of_items_added)
-    log.info("%d products added to cart", count)
+    selected_items, count = add_products(page, config, log, no_of_items_added)
 
     if not cart_badge_matches_selected_items(page, count, log):
         badge_count = _get_no_of_items_cart_badge(page)
@@ -233,6 +247,7 @@ def check_end_to_end_checkout(
         page.get_by_role("textbox", name="Zip/Postal Code").fill(postal_code)
         page.get_by_role("button", name="Continue").click()
         page.wait_for_url("**/checkout-step-two.html")
+
     except (PlaywrightTimeoutError, Error) as e:
         log.error("Checkout steps one/two failed: %s", e)
         return False, None
@@ -293,7 +308,11 @@ def check_end_to_end_checkout(
 # FOOTER LINK AUDIT
 # ——————————————————————————————
 def open_social_link_in_new_tab(
-    page: Page, context: BrowserContext, social: str, log: logging.Logger
+    page: Page,
+    context: BrowserContext,
+    config: PortalConfig,
+    social: str,
+    log: logging.Logger,
 ) -> bool:
     """
     Click a footer social link, confirm it opens a working page in a
@@ -301,140 +320,37 @@ def open_social_link_in_new_tab(
     just as real a failure as one that opens to a 404 — both must be
     reported, neither should crash the run.
     """
-    try:
+
+    def _open_social_link() -> bool:
         with context.expect_page() as new_page_info:
             page.locator(f'[data-test="social-{social}"]').click()
         new_page = new_page_info.value
-    except (PlaywrightTimeoutError, Error) as e:
-        log.error("'%s' link never opened a new tab: %s", social, e)
-        return False
+        try:
+            new_page.wait_for_load_state("domcontentloaded")
+            expected_name = "x.com" if social == "twitter" else f"{social}.com"
+            url_ok = expected_name in new_page.url
 
-    try:
-        new_page.wait_for_load_state("domcontentloaded")
-        expected_name = "x.com" if social == "twitter" else f"{social}.com"
-        url_ok = expected_name in new_page.url
+            if not url_ok:
+                raise ValueError(
+                    f"'{social}' link opened to an unexpected URL: {new_page.url}"
+                )
 
-        if url_ok:
             log.info("✅ '%s' link opened successfully in new tab", social)
             return True
-
-        log.error("❌ '%s' link loaded but failed the title/URL check", social)
-        return False
-
-    except (PlaywrightTimeoutError, Error) as e:
-        log.error("'%s' tab failed to load correctly: %s", social, e)
-        return False
-    finally:
-        new_page.close()
-        log.info("'%s' link tab closed cleanly", social)
-
-
-# ——————————————————————————————
-# ORCHESTRATOR
-# ——————————————————————————————
-def run_workflow(
-    headless: bool = True,
-    no_of_items_added: int = 2,
-    firstname: str = "Abdulmalik",
-    lastname: str = "Abdulsamad",
-    postal: str = "50072",
-) -> list[CheckResult]:
-    """
-    Phase 2 orchestrator. Every account produces exactly one
-    CheckResult — success, expected-failure, or crash — nothing is
-    ever silently dropped from the final report.
-    """
-    log = setup_logging(LOG_DIR)
-    log.info("=== CheckoutGuard Mornitor started ====")
-
-    accounts = [
-        ("standard_user", Auth.standard_user),
-        ("locked_out_user", Auth.locked_out_user),
-        ("problem_user", Auth.problem_user),
-        ("performance_glitch_user", Auth.performance_glitch_user),
-    ]
-
-    footer_links = ["facebook", "twitter", "linkedin"]
-
-    results: list[CheckResult] = []
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        context = browser.new_context()
-        page = context.new_page()
-        page.set_default_timeout(DEFAULT_TIMEOUT_MS)
-
-        try:
-            for account_name, username in accounts:
-                try:
-                    login_result = attempt_login(
-                        page, account_name, username, Auth.password, log
-                    )
-                except Exception as e:  # noqa: BLE001 — deliberate: isolate the batch
-                    log.exception(
-                        "Unhandled error logging in '%s': %s", account_name, e
-                    )
-                    results.append(
-                        CheckResult(
-                            account_name,
-                            login_success=False,
-                            notes=f"Login crashed: {e}",
-                        )
-                    )
-                    continue
-
-                if not login_result.success:
-                    log.info(
-                        "Skipping funnel checks for '%s' — login failed as expected",
-                        account_name,
-                    )
-                    results.append(
-                        CheckResult(
-                            account_name,
-                            login_success=False,
-                            notes=f"Skipped — login failed: {login_result.error_message}",
-                        )
-                    )
-                    continue
-
-                result = CheckResult(account_name, login_success=True)
-
-                try:
-                    sorted_prices = sort_items_low_high(page=page, log=log)
-                    result.sorted_prices = sorted_prices
-                    result.is_sorted = is_sorted_from_low_high(sorted_prices)
-                    log.info(
-                        "Prices %s sorted confirmed: %s",
-                        [f"{p:.2f}" for p in sorted_prices],
-                        result.is_sorted,
-                    )
-
-                    checkout_ok, receipt_path = check_end_to_end_checkout(
-                        page, no_of_items_added, firstname, lastname, postal, log
-                    )
-                    result.checkout_end_to_end = checkout_ok
-                    result.order_receipt = receipt_path
-
-                    for link in footer_links:
-                        link_ok = open_social_link_in_new_tab(page, context, link, log)
-                        result.social_link_tab.append((link, link_ok))
-
-                except Exception as e:  # noqa: BLE001 — isolate the batch
-                    log.exception(
-                        "Unhandled error during checks for '%s': %s", account_name, e
-                    )
-                    result.notes = f"Crashed mid-check: {e}"
-
-                results.append(result)
-                logout(page, log)
-
         finally:
-            context.close()
-            browser.close()
-            log.info("Browser closed cleanly")
+            # Close the NEW TAB — success, wrong destination, or
+            # anything else. The caller's `page` is never touched here.
+            new_page.close()
 
-    _print_summary(results, log)
-    return results
+    result = retry_action(
+        _open_social_link,
+        description=f"open {social} link in new tab",
+        log=log,
+        retries=config.max_retries,
+        backoff_base=config.backoff_base,
+    )
+    log.info("'%s' link tab closed cleanly", social)
+    return result
 
 
 # ——————————————————————————————
@@ -443,31 +359,3 @@ def run_workflow(
 def _clean_item_price(item_price: str) -> float:
     clean_item_price = float(re.sub(r"[^\d.]", "", item_price.strip()))
     return clean_item_price
-
-
-def _print_summary(results: list[CheckResult], log: logging.Logger) -> None:
-    log.info("════════════════════════════════════════")
-    log.info("PHASE 2 RUN SUMMARY")
-    for r in results:
-        passed = r.login_success and r.checkout_end_to_end and r.is_sorted
-        status = "✅ PASS" if passed else "❌ FAIL"
-        receipt_note = f"🧾 {r.order_receipt}" if r.order_receipt else "no receipt"
-        log.info(
-            "  [%s] %-26s sorted=%-5s checkout=%-5s links=%s -> %s%s",
-            status,
-            r.account_name,
-            r.is_sorted,
-            r.checkout_end_to_end,
-            r.social_link_tab,
-            receipt_note,
-            f" | {r.notes}" if r.notes else "",
-        )
-    passed_count = sum(
-        r.login_success and r.checkout_end_to_end and r.is_sorted for r in results
-    )
-    log.info("  %d/%d accounts passed the full funnel", passed_count, len(results))
-    log.info(
-        "CheckoutGuard Monitor complete. Receipts saved to -> %s",
-        str(FINAL_DIR / "reports"),
-    )
-    log.info("════════════════════════════════════════")
