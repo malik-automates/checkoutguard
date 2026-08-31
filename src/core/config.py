@@ -15,8 +15,7 @@ constants.
 """
 
 import os
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -25,18 +24,19 @@ load_dotenv()
 
 # Project output and data locations. These are intentionally defined once so
 # callers do not duplicate path-building logic.
-BASE_DIR = Path(".").parent.resolve()
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 RAW_DIR = BASE_DIR / "data" / "raw"
 UPLOAD_DIR = BASE_DIR / "data" / "raw"
 PROC_DIR = BASE_DIR / "data" / "processed"
 FINAL_DIR = BASE_DIR / "data" / "final"
+TRACE_DIR = FINAL_DIR / "traces"
 SCREENSHOT_DIR = BASE_DIR / "screenshots"
 LOG_DIR = BASE_DIR / "logs"
 
 # Target endpoints used by the browser checks.
 BASE_URL = "https://www.saucedemo.com"
 LOGIN_URL = "https://www.saucedemo.com"
-INVENTORY_URL = "https://the-internet.herokuapp.com/inventory.html"
+INVENTORY_URL = "https://www.saucedemo.com/inventory.html"
 
 
 DEFAULT_TIMEOUT_MS = 20_000  # Playwright timeout in milliseconds (20 seconds)
@@ -57,11 +57,14 @@ class Auth:
     performance_glitch_user: str = os.getenv("PERFORMANCE_GLITCH_USERNAME", "None")
     password: str = os.getenv("STANDARD_PASSWORD", "None")
     session_storage_dir: str = os.getenv("STATE_DIR", "None")
+    session_state_filename: str = os.getenv("STATE_FILENAME", "None")
 
-    @property
-    def state_filename(self) -> Path:
+    def state_file(self, username) -> Path:
         """Return the browser state path relative to :data:`BASE_DIR`."""
-        return BASE_DIR / self.session_storage_dir
+        return (
+            Path(self.session_storage_dir)
+            / f"{self.session_state_filename}_{username}.json"
+        )
 
 
 @dataclass
@@ -71,25 +74,6 @@ class Url:
     base_url: str = BASE_URL
     login_url: str = LOGIN_URL
     inventory_url: str = INVENTORY_URL
-
-
-@dataclass
-class RunReport:
-    """Mutable summary of one monitoring run.
-
-    ``issues`` contains human-readable descriptions of problems encountered
-    during the run. Counters are initialized to zero for each new report.
-    """
-
-    run_timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
-    steps_attempted: int = 0
-    steps_succeeded: int = 0
-    steps_failed: int = 0
-    issues: list = field(default_factory=list)
-
-    def add_issues(self, description: str) -> None:
-        """Append an issue description to the report."""
-        self.issues.append(description)
 
 
 @dataclass
