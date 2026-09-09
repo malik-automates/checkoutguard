@@ -1,0 +1,80 @@
+name: CheckoutGuard Monitor
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # every hour, on the hour (UTC)
+  workflow_dispatch: {}     # lets you trigger it manually from the Actions tab
+
+permissions:
+  issues: write            # only this job gets this permission — least privilege
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Run CheckoutGuard monitor
+        env:
+          STANDARD_USERNAME: ${{ secrets.STANDARD_USERNAME }}
+          LOCKED_OUT_USERNAME: ${{ secrets.LOCKED_OUT_USERNAME }}
+          PROBLEM_USERNAME: ${{ secrets.PROBLEM_USERNAME }}
+          PERFORMANCE_GLITCH_USERNAME: ${{ secrets.PERFORMANCE_GLITCH_USERNAME }}
+          STANDARD_PASSWORD: ${{ secrets.STANDARD_PASSWORD }}
+          STATE_DIR: ${{ vars.STATE_DIR }}
+          STATE_FILENAME: ${{ vars.STATE_FILENAME }}
+        run: python run_monitor.py
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkoutguard-failure-evidence
+          path: |
+            data/final/traces/
+            screenshots/
+          retention-days: 14
+
+      - name: Open GitHub issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'checkoutguard-alert'
+            });
+
+            if (existing.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🚨 CheckoutGuard failure — ${new Date().toISOString()}`,
+                body: [
+                  'The scheduled checkout monitor detected a failure.',
+                  '',
+                  `**Workflow run:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+                  '',
+                  'Download the trace/screenshot artifact from that run for full evidence, or run:',
+                  '`playwright show-trace <trace-file>.zip`'
+                ].join('\n'),
+                labels: ['checkoutguard-alert']
+              });
+              console.log('Issue created.');
+            } else {
+              console.log('An open alert issue already exists — not creating a duplicate.');
+            }
