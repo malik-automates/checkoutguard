@@ -13,6 +13,7 @@ from src.checks import (
     open_social_link_in_new_tab,
     sort_items_low_high,
 )
+from src.command import build_arg_parse
 from src.core.config import (
     DEFAULT_TIMEOUT_MS,
     LOG_DIR,
@@ -72,7 +73,7 @@ def run_account(
     # work. Discarded on success, saved only if something fails.
     context.tracing.start(screenshots=True, snapshots=True, sources=True)
     page = context.new_page()
-    page.set_default_timeout(DEFAULT_TIMEOUT_MS)
+    page.set_default_timeout(config.timeout_ms)
     capture_proof_screenshot(page, username, True, SCREENSHOT_DIR)
 
     had_failures = False
@@ -157,8 +158,17 @@ def print_summary(report: HealthCheckReport, log: logging.Logger) -> None:
 
 
 def main() -> None:
-    config = PortalConfig(auth=Auth(), url=Url())
-    log = setup_logging(LOG_DIR)
+    args = build_arg_parse().parse_args()
+    config = PortalConfig(
+        auth=Auth(),
+        url=Url(),
+        headless=(args.headless == "true"),
+        max_retries=args.max_retries,
+        backoff_base=args.backoff_base,
+        force_relogin=args.force_relogin,
+    )
+    config.timeout_ms = config.resolve_timeout(args.timeout)
+    log = setup_logging(config.log_dir, args.log_level)
     log.info("=== CheckoutGuard Monitor Phase 3: Reliability Started ====")
 
     accounts = [
