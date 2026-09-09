@@ -15,7 +15,7 @@ constants.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -92,3 +92,35 @@ class PortalConfig:
     backoff_base: float = 1.5
     force_relogin: bool = False
     default_timeout_ms: int = DEFAULT_TIMEOUT_MS
+    log_dir: Path = LOG_DIR
+
+    # the actual value that will be used by Playwright
+    timeout_ms: int = field(init=False)
+
+    def __post_init__(self):
+        # Will be overwritten right after the creation if a CLI value is supplied
+        self.timeout_ms = self.default_timeout_ms
+
+    @property
+    def timeout(self) -> dict[str, int]:
+        """Named timeout preset in milliseconds"""
+        return {
+            "10s": 10_000,
+            "20s": self.default_timeout_ms,
+            "15s": 15_000,
+            "25s": 25_000,
+        }
+
+    def resolve_timeout(self, key: str | int | None = None) -> int:
+        """Resolve a timeout key (or raw ms) to an integer milliseconds value"""
+        if key is None:
+            return self.default_timeout_ms
+        if isinstance(key, int):
+            return key
+        # string keys
+        try:
+            return self.timeout[key]
+        except KeyError:
+            raise ValueError(
+                f"Unknown timeout key {key!r}. Valid keys: {list(self.timeout)}"
+            ) from None
