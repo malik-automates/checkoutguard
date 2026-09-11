@@ -22,6 +22,7 @@ from src.core.config import (
     Auth,
     PortalConfig,
     Url,
+    ensure_project_directories,
 )
 from src.core.logger import setup_logging
 from src.report import CheckResult, HealthCheckReport
@@ -168,6 +169,7 @@ def main() -> None:
         force_relogin=args.force_relogin,
     )
     config.timeout_ms = config.resolve_timeout(args.timeout)
+    ensure_project_directories(config)
     log = setup_logging(config.log_dir, args.log_level)
     log.info("=== CheckoutGuard Monitor Phase 3: Reliability Started ====")
 

@@ -58,12 +58,13 @@ class Auth:
     password: str = os.getenv("STANDARD_PASSWORD", "None")
     session_storage_dir: str = os.getenv("STATE_DIR", "None")
     session_state_filename: str = os.getenv("STATE_FILENAME", "None")
+    session_user: str = ""
 
-    def state_file(self, username) -> Path:
+    def state_file(self) -> Path:
         """Return the browser state path relative to :data:`BASE_DIR`."""
         return (
             Path(self.session_storage_dir)
-            / f"{self.session_state_filename}_{username}.json"
+            / f"{self.session_state_filename}_{self.session_user}.json"
         )
 
 
@@ -124,3 +125,11 @@ class PortalConfig:
             raise ValueError(
                 f"Unknown timeout key {key!r}. Valid keys: {list(self.timeout)}"
             ) from None
+
+
+def ensure_project_directories(config: "PortalConfig") -> None:
+    """A fresh clone or CI runner starts with none of these folders —
+    only the code creating them explicitly can be trusted."""
+    for directory in (LOG_DIR, SCREENSHOT_DIR, FINAL_DIR, TRACE_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
+    config.auth.state_file().parent.mkdir(parents=True, exist_ok=True)

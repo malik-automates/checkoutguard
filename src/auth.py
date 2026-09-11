@@ -121,7 +121,8 @@ def get_authenticated_context(
 
     Returns (context, login_success, error_message).
     """
-    session_file = config.auth.state_file(username)
+    config.auth.session_user = username
+    session_file = config.auth.state_file()
     if not config.force_relogin and session_file.exists():
         log.info("Attempting to reuse saved session -> %s", session_file)
         candidate = browser.new_context(storage_state=str(session_file))
