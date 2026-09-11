@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 def setup_logging(log_dir: Path, level: str = "INFO") -> logging.Logger:
+    log_dir.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("checkguard")
     # GUARD: if this logger already has handlers, DON'T attach more.
     # Without this, every extra call to setup_logging() doubles your
