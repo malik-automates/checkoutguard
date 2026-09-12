@@ -110,6 +110,7 @@ class PortalConfig:
             "20s": self.default_timeout_ms,
             "15s": 15_000,
             "25s": 25_000,
+            "30s": 30_000,
         }
 
     def resolve_timeout(self, key: str | int | None = None) -> int:

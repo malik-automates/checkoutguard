@@ -29,7 +29,7 @@ def build_arg_parse() -> argparse.ArgumentParser:
         "-t",
         default="20s",
         type=str,
-        choices=["10s", "15s", "20s", "25s"],
+        choices=["10s", "15s", "20s", "25s", "30s"],
         help="timeout preset(default: 20s -> 20000 ms)",
     )
     return parser

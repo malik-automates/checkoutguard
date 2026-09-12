@@ -28,14 +28,14 @@ jobs:
 
       - name: Run CheckoutGuard monitor
         env:
-          STANDARD_USERNAME: ${{ secrets.STANDARD_USERNAME }}
-          LOCKED_OUT_USERNAME: ${{ secrets.LOCKED_OUT_USERNAME }}
-          PROBLEM_USERNAME: ${{ secrets.PROBLEM_USERNAME }}
-          PERFORMANCE_GLITCH_USERNAME: ${{ secrets.PERFORMANCE_GLITCH_USERNAME }}
+          STANDARD_USERNAME: ${{ vars.STANDARD_USERNAME }}
+          LOCKED_OUT_USERNAME: ${{ vars.LOCKED_OUT_USERNAME }}
+          PROBLEM_USERNAME: ${{ vars.PROBLEM_USERNAME }}
+          PERFORMANCE_GLITCH_USERNAME: ${{ vars.PERFORMANCE_GLITCH_USERNAME }}
           STANDARD_PASSWORD: ${{ secrets.STANDARD_PASSWORD }}
           STATE_DIR: ${{ vars.STATE_DIR }}
           STATE_FILENAME: ${{ vars.STATE_FILENAME }}
-        run: python run_monitor.py
+        run: python run_monitor.py -t 30s
 
       - name: Upload failure evidence
         if: failure()

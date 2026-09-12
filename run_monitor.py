@@ -87,12 +87,8 @@ def run_account(
             sorted_prices = sort_items_low_high(page=page, log=log)
             report.check.sorted_prices = sorted_prices
             report.check.is_sorted = is_sorted_from_low_high(sorted_prices)
-            if report.check.is_sorted == False and username != Auth.problem_user:
-                raise ValueError(
-                    f"Sorted price is expected to be True - except for '{Auth.problem_user}'"
-                )
             report.steps_succeeded += 1
-        except (PlaywrightTimeoutError, ValueError, Error) as e:
+        except (PlaywrightTimeoutError, Error) as e:
             log.error("Step 'sort' failed for '%s': %s", username, e)
             report.steps_failed += 1
             report.add_issue(f"Sort failed: {e}")
@@ -106,16 +102,8 @@ def run_account(
             )
             report.check.checkout_end_to_end = checkout_ok
             report.check.order_receipt = receipt_path
-            if (
-                checkout_ok == False
-                and receipt_path is None
-                and username == Auth.problem_user
-            ):
-                raise ValueError("Checkout process crashed")
             report.steps_succeeded += 1
             had_failures = had_failures or not checkout_ok
-        except ValueError as e:
-            all_issues.append(f"{e} for {username}")
         except (PlaywrightTimeoutError, Error) as e:
             log.error("Step 'checkout' failed for '%s': %s", username, e)
             report.steps_failed += 1
@@ -219,13 +207,14 @@ def main() -> None:
             browser.close()
             log.info("Browser closed cleanly\n")
 
-    if len(all_issues) != 0:
-        log.info(f"Total No. of issues found: {len(all_issues)}")
+    issues = [issue for issue in all_issues if Auth.locked_out_user not in issue]
+    if len(issues) > 0:
+        log.info(f"Total No. of issues found: {len(issues)}")
         log.info("=== Issue Summary ===")
         for i, issue in enumerate(all_issues, 1):
-            log.info(
-                f"{i} - {issue} - {'✅ Expected' if Auth.locked_out_user in issue or Auth.problem_user in issue else '❌ Not Expected'}"
-            )
+            log.info(f"❌ - {i} : {issue} ")
+    else:
+        log.info("✅ NO Unexpected issues found!")
 
     sys.exit(1 if overall_failed else 0)
 

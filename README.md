@@ -45,7 +45,7 @@ python -m venv .venv && source .venv/bin/activate   # or .venv\Scripts\activate 
 pip install -r requirements.txt
 playwright install --with-deps chromium
 cp .env.example .env   # fill in your own values
-python run_monitor.py --headless
+python run_monitor.py
 ```
 
 Run the offline test suite (no network needed):
