@@ -320,6 +320,9 @@ def open_social_link_in_new_tab(
     just as real a failure as one that opens to a 404 — both must be
     reported, neither should crash the run.
     """
+    display_social_name = lambda: (
+        f"{social.capitalize()} (twitter)" if social == "x" else social
+    )
 
     def _open_social_link() -> bool:
         with context.expect_page() as new_page_info:
@@ -327,7 +330,7 @@ def open_social_link_in_new_tab(
         new_page = new_page_info.value
         try:
             new_page.wait_for_load_state("domcontentloaded")
-            expected_name = "x.com" if social == "twitter" else f"{social}.com"
+            expected_name = "x.com" if social == "x" else f"{social}.com"
             url_ok = expected_name in new_page.url
 
             if not url_ok:
@@ -335,7 +338,10 @@ def open_social_link_in_new_tab(
                     f"'{social}' link opened to an unexpected URL: {new_page.url}"
                 )
 
-            log.info("✅ '%s' link opened successfully in new tab", social)
+            log.info(
+                "✅ '%s' link opened successfully in new tab",
+                display_social_name(),
+            )
             return True
         finally:
             # Close the NEW TAB — success, wrong destination, or
@@ -349,7 +355,7 @@ def open_social_link_in_new_tab(
         retries=config.max_retries,
         backoff_base=config.backoff_base,
     )
-    log.info("'%s' link tab closed cleanly", social)
+    log.info("'%s' link tab closed cleanly", display_social_name())
     return result
 
 

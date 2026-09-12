@@ -4,7 +4,8 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-from playwright.sync_api import Browser, sync_playwright
+from playwright.sync_api import Browser, Error, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from src.auth import capture_proof_screenshot, get_authenticated_context, logout
 from src.checks import (
@@ -15,8 +16,6 @@ from src.checks import (
 )
 from src.command import build_arg_parse
 from src.core.config import (
-    DEFAULT_TIMEOUT_MS,
-    LOG_DIR,
     SCREENSHOT_DIR,
     TRACE_DIR,
     Auth,
@@ -27,7 +26,9 @@ from src.core.config import (
 from src.core.logger import setup_logging
 from src.report import CheckResult, HealthCheckReport
 
-FOOTER_LINKS = ["facebook", "twitter", "linkedin"]
+FOOTER_LINKS = ["facebook", "x", "linkedin"]
+
+all_issues: list = []
 
 
 def run_account(
@@ -62,7 +63,9 @@ def run_account(
         return report
 
     if not login_success:
-        report.add_issue(f"Login failed: {login_error}")
+        msg = f"Login for {username} failed : {login_error}"
+        report.add_issue(msg)
+        all_issues.append(msg)
         log.info("Skipping funnel checks for '%s' — login failed", username)
         if context is not None:
             context.close()
@@ -84,12 +87,17 @@ def run_account(
             sorted_prices = sort_items_low_high(page=page, log=log)
             report.check.sorted_prices = sorted_prices
             report.check.is_sorted = is_sorted_from_low_high(sorted_prices)
+            if report.check.is_sorted == False and username != Auth.problem_user:
+                raise ValueError(
+                    f"Sorted price is expected to be True - except for '{Auth.problem_user}'"
+                )
             report.steps_succeeded += 1
-        except Exception as e:
+        except (PlaywrightTimeoutError, ValueError, Error) as e:
             log.error("Step 'sort' failed for '%s': %s", username, e)
             report.steps_failed += 1
             report.add_issue(f"Sort failed: {e}")
             had_failures = True
+            all_issues.append(f"Sort failed for {username}: {e}")
 
         try:
             report.steps_attempted += 1
@@ -98,13 +106,22 @@ def run_account(
             )
             report.check.checkout_end_to_end = checkout_ok
             report.check.order_receipt = receipt_path
+            if (
+                checkout_ok == False
+                and receipt_path is None
+                and username == Auth.problem_user
+            ):
+                raise ValueError("Checkout process crashed")
             report.steps_succeeded += 1
             had_failures = had_failures or not checkout_ok
-        except Exception as e:
+        except ValueError as e:
+            all_issues.append(f"{e} for {username}")
+        except (PlaywrightTimeoutError, Error) as e:
             log.error("Step 'checkout' failed for '%s': %s", username, e)
             report.steps_failed += 1
             report.add_issue(f"Checkout failed: {e}")
             had_failures = True
+            all_issues.append(f"Checkout failed for {username}: {e}")
 
         for link in FOOTER_LINKS:
             try:
@@ -118,6 +135,7 @@ def run_account(
                 report.steps_failed += 1
                 report.add_issue(f"{link} link failed: {e}")
                 had_failures = True
+                all_issues.append(f"{link} failed for {username} : {e}")
 
         try:
             logout(page, log)
@@ -125,6 +143,7 @@ def run_account(
             log.error("Logout failed for '%s': %s", username, e)
             report.add_issue(f"Logout failed: {e}")
             had_failures = True
+            all_issues.append(f"Logout failed: {e}")
 
     finally:
         if had_failures:
@@ -143,7 +162,7 @@ def run_account(
 
 def print_summary(report: HealthCheckReport, log: logging.Logger) -> None:
     log.info("════════════════════════════════════════")
-    log.info("PHASE 3 RUN SUMMARY — %s", report.check.username)
+    log.info("CheckoutGuard Run Summary for '%s' account", report.check.username)
     log.info("  Login success       : %s", report.check.login_success)
     log.info("  Sorted prices       : %s", report.check.sorted_prices)
     log.info("  Sort confirmed      : %s", report.check.is_sorted)
@@ -198,7 +217,15 @@ def main() -> None:
                 overall_failed = overall_failed or report.steps_failed > 0
         finally:
             browser.close()
-            log.info("Browser closed cleanly")
+            log.info("Browser closed cleanly\n")
+
+    if len(all_issues) != 0:
+        log.info(f"Total No. of issues found: {len(all_issues)}")
+        log.info("=== Issue Summary ===")
+        for i, issue in enumerate(all_issues, 1):
+            log.info(
+                f"{i} - {issue} - {'✅ Expected' if Auth.locked_out_user in issue or Auth.problem_user in issue else '❌ Not Expected'}"
+            )
 
     sys.exit(1 if overall_failed else 0)
 

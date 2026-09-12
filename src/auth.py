@@ -121,7 +121,7 @@ def get_authenticated_context(
 
     Returns (context, login_success, error_message).
     """
-    config.auth.session_user = username
+    config.auth.session_user = username  # update before declaring session file
     session_file = config.auth.state_file()
     if not config.force_relogin and session_file.exists():
         log.info("Attempting to reuse saved session -> %s", session_file)
@@ -144,7 +144,7 @@ def get_authenticated_context(
 def logout(page: Page, log: logging.Logger) -> None:
     log.info("Log out from the inventory page and confirm we are back at login page")
     page.get_by_role("button", name="Open Menu").click()
-    logout_link = page.get_by_role("link", name="Logout")
+    logout_link = page.get_by_role("button", name="Logout")
     logout_link.click()
     page.wait_for_url("**/")
     log.info("logout - back at %s", page.url)
