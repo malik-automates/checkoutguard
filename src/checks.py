@@ -157,17 +157,32 @@ def cart_badge_matches_selected_items(
 
 
 def _cart_items_match_selected_items(
-    page: Page, selected_items: list[dict[str, str]]
+    page: Page, selected_items: list[dict[str, str]], log: logging.Logger
 ) -> tuple[bool, list[str]]:
     """
     Compare items actually present on the page against what we clicked.
+    Skips any matched element that isn't a genuine product row instead
+    of hanging on it — an unexpected extra element on the page becomes
+    a fast, clear mismatch, never a 30-second stall.
     """
     all_cart_items: list[str] = []
     rows = page.locator("[data-test='inventory-item']").all()
+
+    if len(rows) != len(selected_items):
+        log.warning(
+            "Expected %d cart rows, found %d on the page — investigate if this repeats",
+            len(selected_items),
+            len(rows),
+        )
+
     for row in rows:
-        item_name = row.locator("[data-test='inventory-item-name']").inner_text()
-        price = row.locator("[data-test='inventory-item-price']").inner_text()
-        all_cart_items.append(f"{item_name}, {price}")
+        name_locator = row.locator("[data-test='inventory-item-name']")
+        price_locator = row.locator("[data-test='inventory-item-price']")
+        if name_locator.count() == 0 or price_locator.count() == 0:
+            continue  # not a genuine product row — don't wait on it
+        all_cart_items.append(
+            f"{name_locator.inner_text()}, {price_locator.inner_text()}"
+        )
 
     items_match = all(
         f"{item['item_name']}, {item['price']}" in all_cart_items
@@ -192,7 +207,7 @@ def check_items_in_cart_match_items_selected(
         log.error("Could not reach the cart page: %s", e)
         return False, []
 
-    return _cart_items_match_selected_items(page, selected_items)
+    return _cart_items_match_selected_items(page, selected_items, log)
 
 
 # =================================
@@ -258,7 +273,7 @@ def check_end_to_end_checkout(
         page.locator("[data-test='total-label']").inner_text()
     )
     final_items_match, final_cart_items = _cart_items_match_selected_items(
-        page, selected_items
+        page, selected_items, log
     )
     total_matches = expected_total == actual_total
 
