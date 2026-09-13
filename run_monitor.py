@@ -178,7 +178,7 @@ def main() -> None:
     config.timeout_ms = config.resolve_timeout(args.timeout)
     ensure_project_directories(config)
     log = setup_logging(config.log_dir, args.log_level)
-    log.info("=== CheckoutGuard Monitor v1.1 started ====")
+    log.info("=== CheckoutGuard Monitor v1.0 started ====")
 
     accounts = [
         ("standard_user", Auth.standard_user),
@@ -214,7 +214,7 @@ def main() -> None:
         for i, issue in enumerate(issues, 1):
             log.info(f"❌ - {i} : {issue} ")
     else:
-        log.info("✅ CheckoutGuard Monitor v1.1 complete. NO issues found!")
+        log.info("✅ CheckoutGuard Monitor v1.0 complete. NO issues found!")
 
     sys.exit(1 if overall_failed else 0)
 

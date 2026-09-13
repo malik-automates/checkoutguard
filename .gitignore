@@ -3,9 +3,9 @@ __init__.py
 __pycache__/
 __pycache__
 draft_code/*
+.pytest_cache/
 .env
 data/
 logs/
-tests/
 .venv/
 screenshots/

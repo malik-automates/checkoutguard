@@ -1,4 +1,4 @@
-# CheckoutGuard Monitor
+# CheckoutGuard Monitor v1.0
 
 [![CheckoutGuard Monitor](https://github.com/malik-automates/checkoutguard/actions/workflows/monitor.yml/badge.svg)](https://github.com/malik-automates/checkoutguard/actions/workflows/monitor.yml)
 
